@@ -73,7 +73,10 @@ int main(int argc, char** argv)
             while (n--) tb_queue_put(queue, (tb_pointer_t)(tb_size_t)(n + 1));
             tb_printf("[container] queue gets:");
             while (tb_queue_size(queue))
+            {
                 tb_printf(" %lu", (tb_size_t)tb_queue_get(queue));
+                tb_queue_pop(queue);
+            }
             tb_printf("\n");
             tb_queue_exit(queue);
         }

@@ -152,7 +152,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path tbox-install\lib | Out-Null
-          $roots = @("$env:USERPROFILE\.xmake", "$env:LOCALAPPDATA\xmake", "$env:APPDATA\xmake")
+          $roots = @("$env:USERPROFILE\.xmake", "$env:LOCALAPPDATA\.xmake", "$env:LOCALAPPDATA\xmake", "$env:APPDATA\xmake")
           foreach ($root in $roots) {
             if (-not (Test-Path $root)) { continue }
             Get-ChildItem $root -Recurse -Directory -Filter sqlite3 -ErrorAction SilentlyContinue | ForEach-Object {
@@ -185,9 +185,9 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          cmake -S . -B build/output -G Ninja -DCMAKE_BUILD_TYPE=Release `
+          cmake -S . -B build/output -DCMAKE_BUILD_TYPE=Release `
               -DTBOX_ROOT="$env:GITHUB_WORKSPACE\tbox-install"
-          cmake --build build/output
+          cmake --build build/output --config Release
           ctest -C Release --test-dir build/output --output-on-failure
 
       # ------------------------------------------------------------------

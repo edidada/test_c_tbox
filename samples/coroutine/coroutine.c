@@ -27,8 +27,11 @@ static tb_void_t producer(tb_cpointer_t priv)
 static tb_void_t consumer(tb_cpointer_t priv)
 {
     tb_co_channel_ref_t channel = (tb_co_channel_ref_t)priv;
+    /* two consumers join this coroutine, each receives 5 items,
+     * so the total received equals what the producer sends (10 items)
+     */
     tb_size_t i = 0;
-    tb_size_t n = 10;
+    tb_size_t n = 5;
     for (i = 0; i < n; i++)
     {
         tb_size_t value = (tb_size_t)tb_co_channel_recv(channel);

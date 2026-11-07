@@ -1,0 +1,178 @@
+name: build
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.jobname }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # OS versions & CPU architectures:
+        # linux x64/arm64 (native), macOS x64/arm64, windows x64 (native),
+        # plus cross builds for armv7, riscv64, linux-x86 (-m32) and mingw-w64
+        include:
+          - jobname: ubuntu-22.04-x64
+            os: ubuntu-22.04
+            runtests: "1"
+          - jobname: ubuntu-24.04-x64
+            os: ubuntu-24.04
+            runtests: "1"
+          - jobname: ubuntu-22.04-arm64
+            os: ubuntu-22.04-arm
+            runtests: "1"
+          - jobname: ubuntu-24.04-arm64
+            os: ubuntu-24.04-arm
+            runtests: "1"
+          - jobname: macos-13-x64
+            os: macos-13
+            runtests: "1"
+          - jobname: macos-15-arm64
+            os: macos-15
+            runtests: "1"
+          - jobname: windows-2022-x64
+            os: windows-2022
+            runtests: "1"
+          - jobname: windows-2025-x64
+            os: windows-2025
+            runtests: "1"
+          - jobname: linux-armv7-cross
+            os: ubuntu-24.04
+            xmakeplat: linux
+            xmakearch: arm
+            xmakeextra: --cross=arm-linux-gnueabihf-
+            apt: gcc-arm-linux-gnueabihf
+            cmake: "-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=arm -DCMAKE_C_COMPILER=arm-linux-gnueabihf-gcc -DTBOX_ENABLE_DATABASE=OFF"
+          - jobname: linux-riscv64-cross
+            os: ubuntu-24.04
+            xmakeplat: linux
+            xmakearch: riscv64
+            xmakeextra: --cross=riscv64-linux-gnu- --coroutine=n
+            noxmake: "--database=n --sqlite3=n"
+            apt: gcc-riscv64-linux-gnu
+            cmake: "-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=riscv64 -DCMAKE_C_COMPILER=riscv64-linux-gnu-gcc -DTBOX_ENABLE_DATABASE=OFF"
+          - jobname: linux-i386-m32
+            os: ubuntu-24.04
+            xmakeplat: linux
+            xmakearch: i386
+            xmakeextra: --coroutine=n
+            noxmake: "--database=n --sqlite3=n"
+            apt: gcc-multilib
+            cmake: "-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=x86 -DCMAKE_C_FLAGS=-m32 -DTBOX_ENABLE_DATABASE=OFF"
+          - jobname: mingw-w64-cross
+            os: ubuntu-24.04
+            xmakeplat: mingw
+            xmakearch: x64
+            xmakeextra: --sdk=/usr/bin --cross=x86_64-w64-mingw32-
+            noxmake: "--database=n --sqlite3=n"
+            apt: gcc-mingw-w64-x86-64
+            cmake: "-DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=x86_64 -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc -DTBOX_ENABLE_DATABASE=OFF"
+
+    env:
+      # common tbox xmake configure switches: disable heavy unused packages,
+      # keep all modules enabled (stream/coroutine/xml/object/database/...)
+      TBOX_FLAGS: "--small=false --demo=false --mysql=n --zlib=n --pcre=n --pcre2=n --polarssl=n --mbedtls=n --openssl=n ${{ matrix.noxmake }} ${{ matrix.xmakeextra }}"
+
+    steps:
+      # ------------------------------------------------------------------
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ------------------------------------------------------------------
+      - name: Cache xmake packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.xmake/packages
+          key: xmake-pkgs-${{ matrix.jobname }}
+          restore-keys: xmake-pkgs-${{ matrix.jobname }}-
+
+      # ------------------------------------------------------------------
+      - name: Install cross toolchain
+        if: matrix.apt
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.apt }}
+
+      # ------------------------------------------------------------------
+      # build & install tbox (with xmake); samples are built by CMake below
+      - name: Build tbox (linux/macos)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -x
+          git clone --depth 1 https://github.com/tboox/tbox.git tbox
+          cd tbox
+          xmake repo -u
+          opts=(-c -y -m release ${{ env.TBOX_FLAGS }})
+          if [ -n "${{ matrix.xmakeplat }}" ]; then opts+=(-p ${{ matrix.xmakeplat }}); fi
+          if [ -n "${{ matrix.xmakearch }}" ]; then opts+=(-a ${{ matrix.xmakearch }}); fi
+          xmake f "${opts[@]}"
+          xmake -y
+          xmake install -o ../tbox-install tbox
+
+      - name: Bundle sqlite3 from the xmake package cache
+        if: runner.os != 'Windows' && !matrix.noxmake
+        shell: bash
+        run: |
+          mkdir -p tbox-install/lib
+          find "$HOME/.xmake/packages/s/sqlite3" -name "*.a" -exec cp -v {} tbox-install/lib/ \; || true
+
+      - name: Build tbox (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          git clone --depth 1 https://github.com/tboox/tbox.git tbox
+          Set-Location tbox
+          xmake repo -u
+          xmake f -c -y -m release --small=false --demo=false `
+              --mysql=n --zlib=n --pcre=n --pcre2=n --polarssl=n --mbedtls=n --openssl=n
+          xmake -y
+          xmake install -o ..\tbox-install tbox
+          Set-Location ..
+          New-Item -ItemType Directory -Force -Path tbox-install\lib | Out-Null
+          Get-ChildItem "$env:USERPROFILE\.xmake\packages\s\sqlite3" -Recurse -Filter *.lib `
+            | ForEach-Object { Copy-Item $_.FullName -Destination tbox-install\lib -Force }
+
+      # ------------------------------------------------------------------
+      - name: Build & test samples (linux/macos native)
+        if: runner.os != 'Windows' && matrix.cmake == null
+        shell: bash
+        run: |
+          cmake -S . -B build/output -DCMAKE_BUILD_TYPE=Release \
+              -DTBOX_ROOT="$GITHUB_WORKSPACE/tbox-install"
+          cmake --build build/output -j
+          ctest -C Release --test-dir build/output --output-on-failure
+
+      - name: Build samples (cross)
+        if: matrix.cmake != null
+        shell: bash
+        run: |
+          cmake -S . -B build/output -G Ninja -DCMAKE_BUILD_TYPE=Release \
+              -DTBOX_ROOT="$GITHUB_WORKSPACE/tbox-install" ${{ matrix.cmake }}
+          cmake --build build/output -j
+
+      - name: Build & test samples (windows native)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cmake -S . -B build/output -G Ninja -DCMAKE_BUILD_TYPE=Release `
+              -DTBOX_ROOT="$env:GITHUB_WORKSPACE\tbox-install"
+          cmake --build build/output
+          ctest -C Release --test-dir build/output --output-on-failure
+
+      # ------------------------------------------------------------------
+      - name: Archive tbox configure/build directory on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tbox-debug-${{ matrix.jobname }}
+          path: |
+            tbox/.xmake
+            tbox/build
+          if-no-files-found: ignore
+          retention-days: 3

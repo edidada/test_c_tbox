@@ -1,0 +1,16 @@
+# build
+build/
+build-*/
+tbox-install/
+tbox/
+*.bin
+*.db
+*.sqlite3
+*.out.xml
+
+# editor
+.vscode/
+.idea/
+
+# xmake local
+.xmake/

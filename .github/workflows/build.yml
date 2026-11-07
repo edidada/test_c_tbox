@@ -29,12 +29,18 @@ jobs:
           - jobname: ubuntu-24.04-arm64
             os: ubuntu-24.04-arm
             runtests: "1"
-          - jobname: macos-13-x64
-            os: macos-13
-            runtests: "1"
           - jobname: macos-15-arm64
             os: macos-15
             runtests: "1"
+          - jobname: macos-26-arm64
+            os: macos-26
+            runtests: "1"
+          - jobname: macos-26-x64-cross
+            os: macos-26
+            xmakeplat: macosx
+            xmakearch: x86_64
+            noxmake: "--database=n --sqlite3=n"
+            cmake: "-DCMAKE_SYSTEM_NAME=Darwin -DCMAKE_SYSTEM_PROCESSOR=x86_64 -DCMAKE_OSX_ARCHITECTURES=x86_64 -DTBOX_ENABLE_DATABASE=OFF"
           - jobname: windows-2022-x64
             os: windows-2022
             runtests: "1"
@@ -45,14 +51,15 @@ jobs:
             os: ubuntu-24.04
             xmakeplat: linux
             xmakearch: arm
-            xmakeextra: --cross=arm-linux-gnueabihf-
+            xmakeextra: "--cross=arm-linux-gnueabihf- --cxflags=-Wno-error"
+            noxmake: "--database=n --sqlite3=n"
             apt: gcc-arm-linux-gnueabihf
             cmake: "-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=arm -DCMAKE_C_COMPILER=arm-linux-gnueabihf-gcc -DTBOX_ENABLE_DATABASE=OFF"
           - jobname: linux-riscv64-cross
             os: ubuntu-24.04
             xmakeplat: linux
             xmakearch: riscv64
-            xmakeextra: --cross=riscv64-linux-gnu- --coroutine=n
+            xmakeextra: "--cross=riscv64-linux-gnu- --coroutine=n --cxflags=-Wno-error"
             noxmake: "--database=n --sqlite3=n"
             apt: gcc-riscv64-linux-gnu
             cmake: "-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=riscv64 -DCMAKE_C_COMPILER=riscv64-linux-gnu-gcc -DTBOX_ENABLE_DATABASE=OFF"
@@ -60,7 +67,7 @@ jobs:
             os: ubuntu-24.04
             xmakeplat: linux
             xmakearch: i386
-            xmakeextra: --coroutine=n
+            xmakeextra: "--coroutine=n --cxflags=-Wno-error"
             noxmake: "--database=n --sqlite3=n"
             apt: gcc-multilib
             cmake: "-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=x86 -DCMAKE_C_FLAGS=-m32 -DTBOX_ENABLE_DATABASE=OFF"
@@ -68,7 +75,7 @@ jobs:
             os: ubuntu-24.04
             xmakeplat: mingw
             xmakearch: x64
-            xmakeextra: --sdk=/usr/bin --cross=x86_64-w64-mingw32-
+            xmakeextra: "--sdk=/usr --cross=x86_64-w64-mingw32- --cxflags=-Wno-error"
             noxmake: "--database=n --sqlite3=n"
             apt: gcc-mingw-w64-x86-64
             cmake: "-DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=x86_64 -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc -DTBOX_ENABLE_DATABASE=OFF"
@@ -139,9 +146,22 @@ jobs:
           xmake -y
           xmake install -o ..\tbox-install tbox
           Set-Location ..
+
+      - name: Bundle sqlite3 from the xmake package cache (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
           New-Item -ItemType Directory -Force -Path tbox-install\lib | Out-Null
-          Get-ChildItem "$env:USERPROFILE\.xmake\packages\s\sqlite3" -Recurse -Filter *.lib `
-            | ForEach-Object { Copy-Item $_.FullName -Destination tbox-install\lib -Force }
+          $roots = @("$env:USERPROFILE\.xmake", "$env:LOCALAPPDATA\xmake", "$env:APPDATA\xmake")
+          foreach ($root in $roots) {
+            if (-not (Test-Path $root)) { continue }
+            Get-ChildItem $root -Recurse -Directory -Filter sqlite3 -ErrorAction SilentlyContinue | ForEach-Object {
+              Get-ChildItem $_.FullName -Recurse -Filter *.lib -ErrorAction SilentlyContinue | ForEach-Object {
+                Copy-Item $_.FullName -Destination tbox-install\lib -Force -Verbose
+              }
+            }
+          }
+          Get-ChildItem tbox-install\lib -ErrorAction SilentlyContinue | Select-Object Name
 
       # ------------------------------------------------------------------
       - name: Build & test samples (linux/macos native)

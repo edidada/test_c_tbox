@@ -65,8 +65,12 @@ int main(int argc, char** argv)
     }
 
     /* dump only prints in debug builds of tbox (memory check mode) */
+#ifdef __tb_debug__
     tb_allocator_dump(tb_allocator());
     tb_printf("[memory] allocator dump issued (leak check active in debug tbox builds)\n");
+#else
+    tb_printf("[memory] leak check requires a debug build of tbox\n");
+#endif
 
     tb_exit();
     free(pool_data);
